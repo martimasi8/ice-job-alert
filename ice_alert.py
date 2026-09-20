@@ -3,88 +3,139 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from datetime import datetime
 
-BASE_URL = "https://www.ice.it"
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (ICE Job Alert)"
 }
 
-KEYWORDS = [
-    "lavora con noi",
-    "work with us",
-    "concorso",
-    "concorso pubblico",
-    "avviso",
-    "selezione",
-    "tirocinio",
-    "stage",
-    "internship",
-    "junior trade analyst",
+PAGES = {
+    "🇮🇹 Concorsi e Avvisi": "https://www.ice.it/it/chi-siamo/lavora-con-noi/concorsi",
+    "🎓 Tirocini": "https://www.ice.it/it/chi-siamo/lavora-con-noi/tirocini",
+}
+
+POSITIVE_KEYWORDS = [
+    "analyst",
     "trade analyst",
+    "junior trade",
     "market analyst",
     "business analyst",
     "commercial",
     "marketing",
     "business development",
     "market intelligence",
+    "international business",
+    "export",
+    "sales",
+    "tirocinio",
+    "stage",
+    "internship",
+    "assistente",
+    "borsa di ricerca",
+]
+
+IGNORE_KEYWORDS = [
+    "albo fornitori",
+    "fornitori",
+    "gara",
+    "tender",
+    "procurement",
+    "pulizia",
+    "cleaning",
+    "assicurazione",
+    "medical insurance",
+    "graduatoria finale",
+    "graduatoria definitiva",
+    "nomina commissione",
+    "commissione esaminatrice",
+    "elenco candidati",
+    "candidati ammessi",
+    "verbale",
+    "conflitto di interessi",
 ]
 
 def get_page(url):
     try:
-        response = requests.get(url, headers=HEADERS, timeout=20)
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=30
+        )
         response.raise_for_status()
         return response.text
     except Exception as e:
-        print(f"Errore nel caricamento di {url}: {e}")
+        print(f"ERRORE: {url}")
+        print(e)
         return None
 
 
-def extract_links(url, html):
-    soup = BeautifulSoup(html, "html.parser")
-    links = []
-
-    for a in soup.find_all("a", href=True):
-        text = a.get_text(" ", strip=True)
-        href = urljoin(url, a["href"])
-
-        if not text:
-            continue
-
-        combined = f"{text} {href}".lower()
-
-        if any(keyword in combined for keyword in KEYWORDS):
-            links.append({
-                "title": text,
-                "url": href
-            })
-
-    return links
-
-
-def main():
-    print("=" * 60)
-    print("ICE JOB ALERT")
-    print(datetime.now().strftime("%d/%m/%Y %H:%M"))
-    print("=" * 60)
-
-    url = f"{BASE_URL}/it/lavora-con-noi"
+def analyse_page(name, url):
+    print("\n" + "=" * 70)
+    print(name)
+    print(url)
+    print("=" * 70)
 
     html = get_page(url)
 
     if not html:
-        print("Impossibile leggere la pagina ICE.")
         return
 
-    links = extract_links(url, html)
+    soup = BeautifulSoup(html, "html.parser")
 
-    print(f"\nTrovati {len(links)} link potenzialmente rilevanti:\n")
+    results = []
 
-    for item in links:
-        print(f"- {item['title']}")
-        print(f"  {item['url']}")
-        print()
+    for link in soup.find_all("a", href=True):
 
-    print("Controllo completato.")
+        title = link.get_text(" ", strip=True)
+        href = urljoin(url, link["href"])
+
+        if not title:
+            continue
+
+        text = title.lower()
+
+        if any(word in text for word in IGNORE_KEYWORDS):
+            continue
+
+        if any(word in text for word in POSITIVE_KEYWORDS):
+
+            results.append({
+                "title": title,
+                "url": href
+            })
+
+    # elimina duplicati
+    unique = []
+    seen = set()
+
+    for item in results:
+        key = item["url"]
+
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+
+    if not unique:
+        print("Nessuna opportunità rilevante trovata.")
+
+    else:
+        print(f"\nTrovate {len(unique)} opportunità potenzialmente rilevanti:\n")
+
+        for item in unique:
+            print("➡️", item["title"])
+            print("   ", item["url"])
+            print()
+
+
+def main():
+
+    print("=" * 70)
+    print("ICE JOB ALERT")
+    print(datetime.now().strftime("%d/%m/%Y %H:%M"))
+    print("=" * 70)
+
+    for name, url in PAGES.items():
+        analyse_page(name, url)
+
+    print("\nControllo completato.")
 
 
 if __name__ == "__main__":
