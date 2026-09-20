@@ -2,54 +2,61 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from datetime import datetime
+import re
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (ICE Job Alert)"
 }
 
-PAGES = {
-    "🇮🇹 Concorsi e Avvisi": "https://www.ice.it/it/chi-siamo/lavora-con-noi/concorsi",
-    "🎓 Tirocini": "https://www.ice.it/it/chi-siamo/lavora-con-noi/tirocini",
+SOURCE_PAGES = {
+    "Concorsi e Avvisi":
+        "https://www.ice.it/it/chi-siamo/lavora-con-noi/concorsi",
+
+    "Tirocini":
+        "https://www.ice.it/it/chi-siamo/lavora-con-noi/tirocini",
 }
 
-POSITIVE_KEYWORDS = [
+# Parole che identificano una vera opportunità
+JOB_KEYWORDS = [
+    "avviso di selezione",
+    "avviso di assunzione",
+    "selezione",
+    "assunzione",
+    "assistente",
+    "analista",
     "analyst",
     "trade analyst",
-    "junior trade",
     "market analyst",
     "business analyst",
-    "commercial",
-    "marketing",
-    "business development",
-    "market intelligence",
-    "international business",
-    "export",
-    "sales",
+    "junior",
     "tirocinio",
     "stage",
     "internship",
-    "assistente",
-    "borsa di ricerca",
+    "trainee",
+    "borsa",
 ]
 
+# Elementi da ignorare
 IGNORE_KEYWORDS = [
     "albo fornitori",
     "fornitori",
+    "servizi export",
+    "formazione per l'export",
+    "iniziative export",
+    "piano export",
     "gara",
     "tender",
     "procurement",
-    "pulizia",
-    "cleaning",
-    "assicurazione",
-    "medical insurance",
-    "graduatoria finale",
-    "graduatoria definitiva",
-    "nomina commissione",
-    "commissione esaminatrice",
-    "elenco candidati",
+    "graduatoria",
+    "commissione",
     "candidati ammessi",
+    "elenco candidati",
     "verbale",
-    "conflitto di interessi",
+    "esito",
+    "esiti",
+    "nomina",
+    "concluso",
+    "conclusa",
 ]
 
 def get_page(url):
@@ -62,12 +69,17 @@ def get_page(url):
         response.raise_for_status()
         return response.text
     except Exception as e:
-        print(f"ERRORE: {url}")
+        print(f"Errore: {url}")
         print(e)
         return None
 
 
-def analyse_page(name, url):
+def clean_text(text):
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def analyse_source(name, url):
+
     print("\n" + "=" * 70)
     print(name)
     print(url)
@@ -76,15 +88,16 @@ def analyse_page(name, url):
     html = get_page(url)
 
     if not html:
-        return
+        return []
 
     soup = BeautifulSoup(html, "html.parser")
 
     results = []
+    seen = set()
 
     for link in soup.find_all("a", href=True):
 
-        title = link.get_text(" ", strip=True)
+        title = clean_text(link.get_text(" ", strip=True))
         href = urljoin(url, link["href"])
 
         if not title:
@@ -92,37 +105,23 @@ def analyse_page(name, url):
 
         text = title.lower()
 
+        # Ignora contenuti evidentemente non lavorativi
         if any(word in text for word in IGNORE_KEYWORDS):
             continue
 
-        if any(word in text for word in POSITIVE_KEYWORDS):
+        # Cerca opportunità
+        if any(word in text for word in JOB_KEYWORDS):
 
-            results.append({
-                "title": title,
-                "url": href
-            })
+            if href not in seen:
 
-    # elimina duplicati
-    unique = []
-    seen = set()
+                seen.add(href)
 
-    for item in results:
-        key = item["url"]
+                results.append({
+                    "title": title,
+                    "url": href
+                })
 
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-
-    if not unique:
-        print("Nessuna opportunità rilevante trovata.")
-
-    else:
-        print(f"\nTrovate {len(unique)} opportunità potenzialmente rilevanti:\n")
-
-        for item in unique:
-            print("➡️", item["title"])
-            print("   ", item["url"])
-            print()
+    return results
 
 
 def main():
@@ -132,10 +131,28 @@ def main():
     print(datetime.now().strftime("%d/%m/%Y %H:%M"))
     print("=" * 70)
 
-    for name, url in PAGES.items():
-        analyse_page(name, url)
+    all_results = []
 
-    print("\nControllo completato.")
+    for name, url in SOURCE_PAGES.items():
+
+        results = analyse_source(name, url)
+
+        for item in results:
+
+            if item not in all_results:
+                all_results.append(item)
+
+    print("\n" + "=" * 70)
+    print(f"TOTALE OPPORTUNITÀ POTENZIALI: {len(all_results)}")
+    print("=" * 70)
+
+    for item in all_results:
+
+        print("\n➡️", item["title"])
+        print(item["url"])
+
+    print("\n")
+    print("Controllo completato.")
 
 
 if __name__ == "__main__":
