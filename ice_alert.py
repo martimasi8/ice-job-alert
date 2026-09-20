@@ -2,13 +2,14 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from datetime import datetime
-import re
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (ICE Job Alert)"
 }
 
-SOURCE_PAGES = {
+BASE_URL = "https://www.ice.it"
+
+ITALY_PAGES = {
     "Concorsi e Avvisi":
         "https://www.ice.it/it/chi-siamo/lavora-con-noi/concorsi",
 
@@ -16,10 +17,8 @@ SOURCE_PAGES = {
         "https://www.ice.it/it/chi-siamo/lavora-con-noi/tirocini",
 }
 
-# Parole che identificano una vera opportunità
-JOB_KEYWORDS = [
+JOB_WORDS = [
     "avviso di selezione",
-    "avviso di assunzione",
     "selezione",
     "assunzione",
     "assistente",
@@ -36,54 +35,107 @@ JOB_KEYWORDS = [
     "borsa",
 ]
 
-# Elementi da ignorare
-IGNORE_KEYWORDS = [
+IGNORE_WORDS = [
     "albo fornitori",
     "fornitori",
-    "servizi export",
-    "formazione per l'export",
-    "iniziative export",
-    "piano export",
     "gara",
     "tender",
     "procurement",
     "graduatoria",
     "commissione",
     "candidati ammessi",
-    "elenco candidati",
     "verbale",
     "esito",
-    "esiti",
     "nomina",
-    "concluso",
-    "conclusa",
+    "servizi export",
+    "formazione per l'export",
+    "iniziative export",
 ]
+
 
 def get_page(url):
     try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=30
-        )
-        response.raise_for_status()
-        return response.text
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        return r.text
     except Exception as e:
-        print(f"Errore: {url}")
-        print(e)
+        print(f"Errore {url}: {e}")
         return None
 
 
-def clean_text(text):
-    return re.sub(r"\s+", " ", text).strip()
+def clean(text):
+    return " ".join(text.split())
 
 
-def analyse_source(name, url):
+def find_work_pages():
 
-    print("\n" + "=" * 70)
-    print(name)
-    print(url)
-    print("=" * 70)
+    print("\n🔎 Ricerca delle sedi ICE estere...")
+
+    url = f"{BASE_URL}/it/mercati"
+
+    html = get_page(url)
+
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    pages = []
+
+    for a in soup.find_all("a", href=True):
+
+        text = clean(a.get_text(" ", strip=True))
+        href = urljoin(url, a["href"])
+
+        if not text:
+            continue
+
+        # Cerchiamo pagine che sembrano appartenere
+        # agli uffici ICE esteri
+        if "/mercati/" in href:
+
+            if href not in [p["url"] for p in pages]:
+
+                pages.append({
+                    "name": text,
+                    "url": href
+                })
+
+    print(f"🌍 Trovate {len(pages)} pagine di mercato.")
+
+    return pages
+
+
+def find_job_pages(market_pages):
+
+    job_pages = []
+
+    for market in market_pages:
+
+        html = get_page(market["url"])
+
+        if not html:
+            continue
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        for a in soup.find_all("a", href=True):
+
+            title = clean(a.get_text(" ", strip=True))
+            href = urljoin(market["url"], a["href"])
+
+            if "lavora con noi" in title.lower():
+
+                job_pages.append({
+                    "office": market["name"],
+                    "title": title,
+                    "url": href
+                })
+
+    return job_pages
+
+
+def analyse_page(name, url):
 
     html = get_page(url)
 
@@ -93,33 +145,27 @@ def analyse_source(name, url):
     soup = BeautifulSoup(html, "html.parser")
 
     results = []
-    seen = set()
 
-    for link in soup.find_all("a", href=True):
+    for a in soup.find_all("a", href=True):
 
-        title = clean_text(link.get_text(" ", strip=True))
-        href = urljoin(url, link["href"])
+        title = clean(a.get_text(" ", strip=True))
+        href = urljoin(url, a["href"])
 
         if not title:
             continue
 
         text = title.lower()
 
-        # Ignora contenuti evidentemente non lavorativi
-        if any(word in text for word in IGNORE_KEYWORDS):
+        if any(word in text for word in IGNORE_WORDS):
             continue
 
-        # Cerca opportunità
-        if any(word in text for word in JOB_KEYWORDS):
+        if any(word in text for word in JOB_WORDS):
 
-            if href not in seen:
-
-                seen.add(href)
-
-                results.append({
-                    "title": title,
-                    "url": href
-                })
+            results.append({
+                "title": title,
+                "url": href,
+                "source": name
+            })
 
     return results
 
@@ -133,26 +179,54 @@ def main():
 
     all_results = []
 
-    for name, url in SOURCE_PAGES.items():
+    # 🇮🇹 ITALIA
 
-        results = analyse_source(name, url)
+    print("\n🇮🇹 ITALIA")
 
-        for item in results:
+    for name, url in ITALY_PAGES.items():
 
-            if item not in all_results:
-                all_results.append(item)
+        results = analyse_page(name, url)
 
-    print("\n" + "=" * 70)
-    print(f"TOTALE OPPORTUNITÀ POTENZIALI: {len(all_results)}")
-    print("=" * 70)
+        all_results.extend(results)
+
+    # 🌍 ESTERO
+
+    print("\n🌍 ESTERO")
+
+    market_pages = find_work_pages()
+
+    work_pages = find_job_pages(market_pages)
+
+    print(f"🔎 Trovate {len(work_pages)} pagine 'Lavora con noi'.")
+
+    for page in work_pages:
+
+        results = analyse_page(
+            page["office"],
+            page["url"]
+        )
+
+        all_results.extend(results)
+
+    # Rimuove duplicati
+
+    unique = {}
 
     for item in all_results:
 
+        unique[item["url"]] = item
+
+    print("\n" + "=" * 70)
+    print(f"🚨 OPPORTUNITÀ POTENZIALI: {len(unique)}")
+    print("=" * 70)
+
+    for item in unique.values():
+
         print("\n➡️", item["title"])
+        print("🌍", item["source"])
         print(item["url"])
 
-    print("\n")
-    print("Controllo completato.")
+    print("\n✅ Controllo completato.")
 
 
 if __name__ == "__main__":
